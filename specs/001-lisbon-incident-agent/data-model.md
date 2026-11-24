@@ -75,13 +75,29 @@ Invariants: exactly one Decision per ticket; `outcome = safety` ⇒ no `listing_
 
 ## AuditEvent
 
-`ts`, `ticket_id`, `tool`, `inputs`, `result`, `policy_checks` (map test → pass/fail + values), `reason`.
+`ts`, `ticket_id`, `agent` (triage | safety | rebooking | refund), `tool`, `inputs`, `result`, `policy_checks` (map test → pass/fail + values), `reason`.
+
+## AgentHandoff
+
+| Field | Type |
+|---|---|
+| ts | datetime |
+| ticket_id | str |
+| from_agent | triage \| rebooking \| refund |
+| to_agent | safety \| rebooking \| refund \| live_ts \| human_queue |
+| reason | str (safety condition, `declines_rebooking`, `no_comparable_home`, escalation signal) |
+| evidence | list[str] (verbatim quotes from `guest_message` where relevant) |
+
+Invariant: the chain for a ticket starts at `triage` and contains at most one of each of `rebooking` and `refund`; `safety` appears only as the last agent.
 
 ## State transitions
 
 ```
-received → screened ─┬─ safety ─────────────────────────────→ handed_off
-                     └─ qualified ─┬─ declines ─────────────→ refunded
-                                   └─ rebook ─┬─ held ──────→ rebooked
-                                              └─ none pass ─→ refunded
+received ─▶ [Triage] screened ─┬─ safety ─────────▶ [Safety] handed_off (live T&S)
+                               ├─ declines ───────▶ [Refund] refunded
+                               └─ rebook ─▶ [Rebooking] ─┬─ held ─────────▶ rebooked
+                                                         └─ none pass ─▶ [Refund] refunded
+
+any state before an outcome ── new safety signal ──▶ [Safety] handed_off
+any state before an outcome ── tool failure / deadline ──▶ escalated (human queue)
 ```

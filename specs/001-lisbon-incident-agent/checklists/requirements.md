@@ -24,6 +24,8 @@
 - [x] Uplift budget and 120% ceiling → FR-021, FR-022
 - [x] Five safety conditions and tool restrictions → FR-001 to FR-003
 - [x] Incident commitment → SC-006
+- [x] Four agents (Triage, Safety, Rebooking, Refund), tool permissions and routes → Agent Architecture, FR-026 to FR-033, SC-007
+- [x] Human takeover signals → Agent Architecture table, FR-033
 
 ## Notes
 Planning can start; rebooking implementation is blocked until the open listings CSV is added to `data/`.

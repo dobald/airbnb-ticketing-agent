@@ -1,6 +1,39 @@
 # Contract: Agent Tools
 
-Three tools are defined by the policy (`handoff_to_safety_agent`, `issue_refund`, `hold_booking`). The others are read or messaging tools. Every tool validates its own preconditions; a violation raises `PolicyViolation` and is logged, never silently corrected.
+Three tools are defined by the policy (`handoff_to_safety_agent`, `issue_refund`, `hold_booking`). The others are read, routing or messaging tools. Every tool validates its own preconditions; a violation raises `PolicyViolation` and is logged, never silently corrected.
+
+## Tool permissions by agent
+
+The tool layer checks the calling agent on every call. A call outside the agent's set raises `ToolNotPermitted` (FR-027).
+
+| Tool | Triage | Safety | Rebooking | Refund |
+|---|:-:|:-:|:-:|:-:|
+| `read_ticket` | ✓ | ✓ | ✓ | ✓ |
+| `extract_signals` | ✓ | | ✓ | ✓ |
+| `route_to` | ✓ | | ✓ | ✓ |
+| `handoff_to_safety_agent` | | ✓ | | |
+| `search_listings` | | | ✓ | |
+| `hold_booking` | | | ✓ | |
+| `issue_refund` | | | | ✓ |
+| `send_guest_message` | | ✓ | ✓ | ✓ |
+| `log_callback_request` | | | ✓ | ✓ |
+| `escalate_to_human` | ✓ | ✓ | ✓ | ✓ |
+
+## route_to
+
+```json
+{ "ticket_id": "LIS-TKT-0055", "from_agent": "triage", "to_agent": "safety",
+  "reason": "injury_or_medical_need", "evidence": ["diabetic and has gone very pale and shaky"] }
+```
+Allowed routes: triage → safety | rebooking | refund; rebooking → refund | safety; refund → safety. Any other pair raises `RouteNotPermitted` (FR-031). Writes an `AgentHandoff`.
+
+## escalate_to_human
+
+`{ "ticket_id": str, "agent": str, "signal": "policy_violation" | "tool_failure" | "deadline" | "above_ceiling_approval", "note": str }`. Puts the ticket in the human support queue. This is separate from `handoff_to_safety_agent`, which is only for the five safety conditions.
+
+## extract_signals
+
+`{ "ticket_id": str, "message": str }` → `MessageSignals` (see data-model.md). Calls the model; the only tool that does.
 
 ## handoff_to_safety_agent
 
@@ -49,10 +82,18 @@ Returns `{ "hold_id": str, "uplift_cents": int }`.
 ## Call order per ticket
 
 ```
-screen message
-  safety?      → handoff_to_safety_agent → send_guest_message        (stop)
-  declines?    → issue_refund(total_paid) → send_guest_message       (stop)
-  otherwise    → search_listings → hold_booking (retry next on race)
-                 none pass → issue_refund(total_paid, no_comparable_home)
-               → send_guest_message
+Triage:     read_ticket → extract_signals
+              safety or uncertain → route_to(safety)
+              declines            → route_to(refund)
+              otherwise           → route_to(rebooking)
+
+Safety:     handoff_to_safety_agent → send_guest_message                       (stop)
+
+Rebooking:  search_listings → hold_booking (retry next on race)
+              held      → send_guest_message [+ log_callback_request]          (stop)
+              none pass → route_to(refund, reason=no_comparable_home)
+
+Refund:     issue_refund(total_paid) → send_guest_message [+ log_callback_request] (stop)
+
+Any agent, on a new guest message: extract_signals; safety hit → route_to(safety)
 ```

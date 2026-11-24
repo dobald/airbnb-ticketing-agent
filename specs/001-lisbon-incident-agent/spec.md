@@ -19,11 +19,62 @@ Ticket profile (from the labelled data):
 
 `guest_requested` alone is a wrong answer for 12 of 60 tickets. Languages: en 37, pt 5, es 5, fr 5, de 4, it 4.
 
+## Agent Architecture
+
+Four agents handle every ticket. Each has one job and a fixed set of tools; no agent can call a tool outside its set. "Safety Agent" is the automated agent in this system. The "live safety agent" in the policy is a human in Trust and Safety, here called the **live T&S agent**.
+
+| Agent | Job | Receives from | Can route to | Action tools allowed |
+|---|---|---|---|---|
+| **Triage Agent** | Reads every ticket first. Screens for safety, checks qualification, decides the route | Ticket queue | Safety, Rebooking, Refund | `extract_signals`, `route_to` (no money, booking or hand-off tools) |
+| **Safety Agent** | Hands safety cases to the live T&S agent and reassures the guest | Triage, Rebooking, Refund | Live T&S agent (terminal) | `handoff_to_safety_agent`, `send_guest_message` |
+| **Rebooking Agent** | Finds, ranks and holds a comparable home for the whole stay | Triage | Refund (no comparable home, or guest declines), Safety | `extract_signals`, `route_to`, `search_listings`, `hold_booking`, `send_guest_message`, `log_callback_request` |
+| **Refund Agent** | Issues one refund of exactly `total_paid` | Triage, Rebooking | Safety | `extract_signals`, `route_to`, `issue_refund`, `send_guest_message`, `log_callback_request` |
+
+All four can also call `read_ticket` and `escalate_to_human`. The full permission matrix is in [contracts/agent-tools.md](contracts/agent-tools.md).
+
+### Routing rules
+
+```
+                 ┌──────────────┐
+ ticket ───────▶ │ Triage Agent │
+                 └──┬─────┬─────┘
+       safety signal│     │qualifies
+                    ▼     ├──── wants to stay ─────▶ Rebooking Agent ──┐
+             Safety Agent │                              │ no home /   │ held
+                    ▲     └──── declines ──▶ Refund Agent◀┘ declines   ▼
+                    │                           │                   rebooked
+                    └── new safety signal ──────┴── from any agent
+                    │
+                    ▼
+             live T&S agent (human)
+```
+
+1. Triage runs first on every ticket. The safety screen runs before qualification or remedy.
+2. Any safety condition, or an uncertain one, routes to Safety. This is checked again on every new guest message at every agent.
+3. A qualifying guest who declines rebooking (asks for money, says they don't want another home) routes to Refund. Everyone else routes to Rebooking, including `callback` and `other` requests.
+4. Rebooking routes to Refund when no listing passes the comparable-home test, or the guest declines every offer. Rebooking never issues a refund itself.
+5. Refund never routes back to Rebooking. A refund closes the stay.
+6. Safety is terminal. After hand-off, only the live T&S agent decides any refund or booking.
+7. Each routing step is recorded as an `AgentHandoff` with the reason and the evidence.
+
+### Human takeover signals
+
+| Signal | Detected by | Goes to | Effect |
+|---|---|---|---|
+| Any of the five safety conditions in `guest_message` | Triage (first screen), any agent (later messages) | Safety Agent → live T&S agent | All money and booking actions stop for the ticket |
+| Safety classifier uncertain | Triage | Safety Agent → live T&S agent | Same as above (fail safe) |
+| Guest asks for a phone call (`callback`) | Triage, Rebooking, Refund | Human support queue via `log_callback_request` | Logged for follow-up; the outcome is not delayed |
+| A comparable home would exceed 120% of the original price | Rebooking | Laura Schmidt (Rebooking and Refund Policy Manager) | Not available on 16 Nov 2026, so the home is not offered |
+| A tool rejects a call (`PolicyViolation`) or fails twice | Any agent | Human support queue | Ticket is parked with a written reason. The run report counts it as having no outcome |
+| No outcome by 23:00 Lisbon time | Run supervisor | Human support queue | Escalated so the midnight commitment can still be met |
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Route safety cases to a live agent (Priority: P1)
 
 A guest describes a situation that puts them at risk: bleeding knee, a 16-year-old alone with a dying phone, a 74-year-old with nowhere warm to wait, being followed, being threatened, a diabetic parent going pale. The agent hands the case to Trust and Safety at once and takes no money or booking action, even if the guest asked only for a refund.
+
+**Agents**: Triage Agent (screen) → Safety Agent (hand-off).
 
 **Why this priority**: Harm to a person outweighs every other outcome. A missed safety case is the worst failure the system can make.
 
@@ -42,6 +93,8 @@ A guest describes a situation that puts them at risk: bleeding knee, a 16-year-o
 ### User Story 2 - Rebook qualifying guests into a comparable home (Priority: P1)
 
 A guest who qualifies and wants to stay is offered and held an open listing that passes every comparable-home test, for the whole remaining stay.
+
+**Agents**: Triage Agent (qualify, route) → Rebooking Agent; falls through to Refund Agent when no home passes.
 
 **Why this priority**: 34 of 60 guests need a bed tonight; this is the bulk of the incident.
 
@@ -62,6 +115,8 @@ A guest who qualifies and wants to stay is offered and held an open listing that
 ### User Story 3 - Refund guests who decline or cannot be placed (Priority: P1)
 
 A guest who declines rebooking, or for whom no comparable home exists, receives a full refund of `total_paid`.
+
+**Agents**: Triage Agent or Rebooking Agent → Refund Agent.
 
 **Why this priority**: 20 guests have already asked for money back; a refund is also the fallback that keeps the midnight commitment.
 
@@ -138,6 +193,16 @@ An operations lead sees, for all 60 tickets, the outcome, the policy tests appli
 - **FR-021**: Uplift = (new `nightly_price` − original `nightly_price`) × nights, floored at 0; the system MUST track cumulative uplift against EUR 9,000 and refuse a hold that would exceed it.
 - **FR-022**: Homes above 120% MUST NOT be offered on 16 Nov 2026 (approver unavailable), regardless of remaining budget.
 
+**Agents and routing**
+- **FR-026**: Every ticket MUST enter through the Triage Agent, which MUST NOT call `issue_refund`, `hold_booking` or `handoff_to_safety_agent`.
+- **FR-027**: Each agent MUST be limited to the tools listed for it in the Agent Architecture table; a call outside that set MUST be rejected and logged.
+- **FR-028**: Only the Safety Agent MAY call `handoff_to_safety_agent`; only the Rebooking Agent MAY call `hold_booking`; only the Refund Agent MAY call `issue_refund`.
+- **FR-029**: Every agent MUST re-screen each new guest message for safety conditions and route to Safety on any hit.
+- **FR-030**: The Rebooking Agent MUST route to the Refund Agent when no listing passes or the guest declines every offer.
+- **FR-031**: The Refund Agent MUST NOT route to the Rebooking Agent, and the Safety Agent MUST NOT route to any agent.
+- **FR-032**: Each routing step MUST be recorded as an `AgentHandoff` (from, to, reason, evidence).
+- **FR-033**: The human takeover signals in the Agent Architecture section MUST each route as stated there.
+
 **Communication and audit**
 - **FR-023**: The system MUST send one reply per ticket in `guest_language`.
 - **FR-024**: The system MUST log every tool call with inputs, the pass/fail result of each test and the reason.
@@ -151,7 +216,8 @@ An operations lead sees, for all 60 tickets, the outcome, the policy tests appli
 - **ComparabilityResult**: per-test pass/fail for a (ticket, listing) pair.
 - **Decision**: the single outcome for a ticket (`rebooking` | `refund` | `safety`) with amount or listing.
 - **UpliftLedger**: running total against the EUR 9,000 budget.
-- **AuditEvent**: one logged tool call.
+- **AuditEvent**: one logged tool call, tagged with the agent that made it.
+- **AgentHandoff**: one routing step between agents (or to a human), with reason and evidence.
 
 ## Success Criteria *(mandatory)*
 
@@ -161,6 +227,7 @@ An operations lead sees, for all 60 tickets, the outcome, the policy tests appli
 - **SC-004**: 0 refunds above `total_paid`; 0 stays with two remedies.
 - **SC-005**: Total uplift ≤ EUR 9,000. (At the 120% ceiling the 34 rebooking stays can use at most EUR 6,327.30, so the per-night ceiling, not the budget, is the binding limit.)
 - **SC-006**: 60/60 tickets have an outcome; the full batch completes in under 15 minutes.
+- **SC-007**: 0 tool calls made by an agent outside its allowed set; every outcome traces back to Triage through recorded `AgentHandoff`s.
 
 ## Assumptions
 

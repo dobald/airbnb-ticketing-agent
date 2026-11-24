@@ -4,7 +4,7 @@
 
 ## Summary
 
-Batch agent that reads the 60 stranded-guest tickets and gives each one exactly one outcome (safety handoff, refund or held comparable home). Claude extracts structured signals from `guest_message`; a deterministic policy engine applies every AirCover rule and calls the tools. An evaluation harness scores the run against `expected_outcome`.
+Four agents (Triage, Safety, Rebooking, Refund) process the 60 stranded-guest tickets, giving each one exactly one outcome: safety hand-off, refund, or held comparable home. Every ticket starts at Triage, which routes it on. Each agent can call only its own tools, enforced by the tool layer. Within each agent, Claude extracts structured signals from `guest_message`, and deterministic policy code applies every AirCover rule. An orchestrator moves tickets between agents and records each `AgentHandoff`. An evaluation harness scores the run against `expected_outcome`.
 
 ## Technical Context
 
@@ -22,8 +22,8 @@ Batch agent that reads the 60 stranded-guest tickets and gives each one exactly 
 
 | Principle | Status | Notes |
 |---|---|---|
-| I. Safety Before Money | Pass | Safety screen runs first; tool layer locks handed-off tickets |
-| II. Policy Is Code | Pass | LLM returns `MessageSignals` only; `policy/` decides |
+| I. Safety Before Money | Pass | Triage screens first; every agent re-screens new messages; only the Safety Agent can hand off; tool layer locks handed-off tickets |
+| II. Policy Is Code | Pass | LLM returns `MessageSignals` only; `policy/` decides; agent tool sets and routes are fixed in code |
 | III. Hard Money Limits | Pass | Cap, ceiling and one-remedy enforced in tool preconditions |
 | IV. Every Guest Gets an Outcome | Pass | Refund fallback when no listing passes; run report flags gaps |
 | V. Evaluated Against Ground Truth | Pass | `eval/` scores against `expected_outcome`, which the loader strips |
@@ -43,6 +43,14 @@ src/lisbon_agent/
     qualify.py       # FR-005
     comparable.py    # FR-009..FR-015
     remedy.py        # FR-007, FR-008, FR-017, FR-018
+  agents/
+    base.py          # Agent base: name, allowed tools, re-screen on new message
+    triage.py        # screen → qualify → route
+    safety.py        # handoff_to_safety_agent + reassurance message
+    rebooking.py     # search, rank, hold; route to refund on no home / decline
+    refund.py        # issue_refund(total_paid)
+  orchestrator.py    # moves tickets between agents, enforces allowed routes, writes AgentHandoff
+  permissions.py     # agent → tool matrix, route matrix
   tools.py           # the contract tools with preconditions
   ledger.py          # uplift budget
   audit.py
