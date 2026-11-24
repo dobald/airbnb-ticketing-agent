@@ -19,16 +19,34 @@ This repo is organised as a [Spec Kit](https://github.com/github/spec-kit) proje
 | `docs/aircover-rebooking-and-refund-rules.md` | Source policy (the authority if anything disagrees) |
 | `data/` | Ticket data; see `data/README.md` |
 
+| `src/lisbon_agent/` | Python package (scaffold) |
+| `tests/` | pytest suite |
+| `.claude/skills/speckit-*` | Spec Kit skills for Claude Code |
+| `.specify/scripts/`, `.specify/workflows/` | Spec Kit helper scripts and workflow |
+
 ## Status
 
-Specification and plan drafted. Implementation not started. Blocked on the open listings export (`data/airbnb_lisbon_open_listings_2026-11-16.csv`) for real rebooking runs; see Open Questions in the spec.
+Python project and Spec Kit (v1.4.5.dev0, Claude integration, PowerShell scripts) set up. Specification and plan drafted; implementation not started. Blocked on the open listings export (`data/airbnb_lisbon_open_listings_2026-11-16.csv`) for real rebooking runs; see Open Questions in the spec.
 
-## Using the Spec Kit commands
+## Python setup
 
-The `/speckit.*` slash commands can be added for your agent with the Spec Kit CLI:
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git specify init --here --ai claude
+uv sync
+uv run pytest
 ```
 
-Keep the existing `constitution.md` and `specs/` when prompted.
+Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`.
+
+## Spec Kit workflow
+
+Open Claude Code in this folder and use the skills in order:
+
+`/speckit-constitution` → `/speckit-specify` → `/speckit-clarify` → `/speckit-plan` → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze` → `/speckit-implement`
+
+To refresh Spec Kit later:
+
+```bash
+uvx --from git+https://github.com/github/spec-kit.git specify init --here --force --integration claude
+```

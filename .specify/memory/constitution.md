@@ -33,11 +33,11 @@ Every tool call is logged with the ticket, the inputs, which policy tests passed
 
 ## Development Workflow
 
-1. `/speckit.specify` writes or updates `specs/NNN-name/spec.md` (what and why, no implementation).
-2. `/speckit.clarify` resolves `[NEEDS CLARIFICATION]` markers before planning.
-3. `/speckit.plan` writes `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md` and checks them against this constitution.
-4. `/speckit.tasks` writes `tasks.md`; tests for policy rules are written before the rules.
-5. `/speckit.implement` executes tasks; the evaluation suite must pass before merge.
+1. `/speckit-specify` writes or updates `specs/NNN-name/spec.md` (what and why, no implementation).
+2. `/speckit-clarify` resolves `[NEEDS CLARIFICATION]` markers before planning.
+3. `/speckit-plan` writes `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md` and checks them against this constitution.
+4. `/speckit-tasks` writes `tasks.md`; tests for policy rules are written before the rules (this overrides the template's "tests optional" default).
+5. `/speckit-analyze` checks spec, plan and tasks agree; `/speckit-implement` executes tasks; `uv run pytest` and the evaluation suite must pass before merge.
 
 ## Governance
 
